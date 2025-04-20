@@ -1,6 +1,10 @@
 #pragma once
 
 #include "byte_stream.hh"
+#include <cstdint>
+#include <list>
+#include <set>
+#include <sys/types.h>
 
 class Reassembler
 {
@@ -42,5 +46,21 @@ public:
   const Writer& writer() const { return output_.writer(); }
 
 private:
+  struct Packet
+  {
+    uint64_t first_index;
+    std::string data;
+    bool is_last;
+  };
+
+  uint64_t first_unpopped_index() { return reader().bytes_popped(); }
+  uint64_t first_unassembled_index() { return writer().bytes_pushed(); }
+  uint64_t first_unacceptable_index() { return first_unassembled_index() + writer().available_capacity(); }
+
   ByteStream output_;
+
+  // std::unordered_map<uint64_t, char> buffer;
+  // std::set<uint64_t> last_indices;
+  void cache( uint64_t first_index, std::string data, bool is_last_substring );
+  std::list<Packet> buffer;
 };
