@@ -19,7 +19,8 @@ void TCPReceiver::receive( TCPSenderMessage message )
   }
 
   uint64_t first_unasm_idx = reassembler_.writer().bytes_pushed();
-  uint64_t stream_index = message.SYN ? 0 : message.seqno.unwrap( ISN_.value(), first_unasm_idx ) - 1; // In case of SYN
+  uint64_t stream_index
+    = message.SYN ? 0 : message.seqno.unwrap( ISN_.value(), first_unasm_idx ) - 1; // In case of SYN
   reassembler_.insert( stream_index, move( message.payload ), message.FIN );
 }
 
@@ -30,7 +31,8 @@ TCPReceiverMessage TCPReceiver::send() const
     ackno = nullopt;
   } else {
     uint64_t first_unasm_idx = reassembler_.writer().bytes_pushed();
-    uint64_t abs_seqno = first_unasm_idx + 1 + ( reassembler_.writer().is_closed() ? 1 : 0 ); // Add syn/fin if needed
+    uint64_t abs_seqno
+      = first_unasm_idx + 1 + ( reassembler_.writer().is_closed() ? 1 : 0 ); // Add syn/fin if needed
     ackno = Wrap32::wrap( abs_seqno, ISN_.value() );
   }
 

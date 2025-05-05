@@ -104,8 +104,8 @@ void Reassembler::cache( uint64_t first_index, std::string data, bool is_last_su
   } );
   // Find the first packet that end after the packet
   auto right = upper_bound(
-    buffer.begin(), buffer.end(), first_index + data.length(), []( uint64_t end_idx, const Packet& packet ) {
-      return end_idx <= packet.first_index + packet.data.length();
+    buffer.begin(), buffer.end(), first_index + data.length(), []( uint64_t end_index, const Packet& packet ) {
+      return end_index <= packet.first_index + packet.data.length();
     } );
 
   // Truncate the left packet if it is overlapping with the new packet
