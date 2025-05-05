@@ -62,5 +62,5 @@ private:
   // std::unordered_map<uint64_t, char> buffer;
   // std::set<uint64_t> last_indices;
   void cache( uint64_t first_index, std::string data, bool is_last_substring );
-  std::list<Packet> buffer;
+  std::list<Packet> buffer {};
 };

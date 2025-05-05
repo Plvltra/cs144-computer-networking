@@ -28,7 +28,7 @@ protected:
   bool error_ {};
 
   bool is_closed_ {};
-  std::queue<char> winds;
+  std::queue<char> winds {};
   std::string peek_ {};
 
   // Writer's variables
