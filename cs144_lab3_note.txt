@@ -1,0 +1,184 @@
+# Check3
+
+sudo ./scripts/tun.sh start 144 
+./build/apps/tcp_native -l 0 9090
+./build/apps/tcp_native 169.254.144.1 9090
+./build/apps/tcp_ipv4 -l 0 9090
+./build/apps/tcp_ipv4 169.254.144.1 9090
+目前 sudo ./scripts/tun.sh start 144 + server(tcp_native) + client(tcp_ipv4)可以建立连接自己的TCPSender
+
+
+###需求>设计>读代码
+需求: tcp_ipv4可以和tcp_native建立连接, 发送信息和中止
+
+#阅读目标
+1.理解tcp_peer.hh和tcp_over_ip.cc是如何实现, 捆绑TCPSender/TCPReceiver成一个TCP peer发送消息
+2.弄清TCPMinnowSocket内部的TCPSender/TCPReceiver在TCPSocket的对应部分
+
+#建立概念手册(记录关键抽象和接口)
+tun/tap: /dev/net/tun, 参考https://www.zhaohuabing.com/post/2020-02-24-linux-taptun/
+	虚拟设备, 应用程序->socket API->TCP协议栈->tun send数据, 沿着反向receive
+socket:
+adapter:
+
+
+#分析目录和文件
+目录结构:
+apps:
+	bidirectional_stream_copy.cc:
+	tcp_ipv4.cc:
+	tcp_native:
+	webget.cc:
+
+src:
+	byte_stream
+	tcp_sender
+	tcp_receiver
+
+util:
+	业务逻辑
+	tcp_peer:
+	fd_adapter:
+		tcp_over_ip:
+		tuntap_adapter:
+		lossy_fd_adapter.hh:
+	file_descriptor:
+		tun:
+		socket:
+			tcp_minnow_socket:
+			tcp_minnow_socket_impl:
+
+	工具文件
+	eventloop:
+	parser:
+	
+	通用基建文件
+	ref:
+
+——————————————————————————————————————————————————————————————————————————————————————————————————————————————
+
+
+主要类: 
+class FdAdapterBase: 包含FdAdapterConfig记录配置信息, 和_listen状态记录当前TCP FSM是否是listen状态
+	class TCPOverIPv4Adapter: 提供unwrap_tcp_in_ip和wrap_tcp_in_ip
+		class TCPOverIPv4OverTunFdAdapter: 包含TunFD _tun, 向tun read/write InternetDatagram
+			write方法: 发送TCPSegment
+		
+template<typename AdapterT>
+class LossyFdAdapter:
+用法全是LossyFdAdapter<TCPOverIPv4OverTunFdAdapter>, 在包裹的Adapter外面模拟网络丢包的情况
+
+class FileDescriptor
+	class Socket
+		class TCPSocket
+		class DatagramSocket
+			class UDPSocket
+		class LocalStreamSocket
+			class TCPMinnowSocket<TCPDatagramAdapter AdaptT>
+			(TCPOverIPv4MinnowSocket=TCPMinnowSocket<TCPOverIPv4OverTunFdAdapter>;)
+			(LossyTCPOverIPv4MinnowSocket=TCPMinnowSocket<LossyFdAdapter<TCPOverIPv4OverTunFdAdapter>>;)
+	class TunTapFD
+		class TunFD
+		class TapFD
+
+class TCPMinnowSocket<TCPDatagramAdapter AdaptT>
+	AdaptT _datagram_adapter: (指向tun设备fd, adpter->write就是先将tcp报文包装指向FdAdapterConfig的ip头部, 再写入)
+	std::optional<TCPPeer> _tcp {}: 包装的收发用的TCPPeer
+	LocalStreamSocket _thread_data: 
+		由socket_pair_helper<LocalStreamSocket>(AF_UNIX, SOCK_STREAM)创建的双工本地文件描述符(
+		返回值first是internal_fd_, second是_thread_data 一端写入可以从另一端读出)。bidirectional_stream_copy(socket)可能存在socket或者_thread_data被写入的情况
+
+class TCPPeer: 封装一对TCPSender, TCPReceiver用于收发消息
+	通过 make_send的变换，将传入的处理TCPMessage的回调转变为TCPSender的
+	
+class EventLoop
+	wait_next_event(int timeout_ms): 等待直到观测的rules的fd发生变化
+		遍历_fd_rules, 对于interset()条件满足的加入到pollfds。如果满足了可读/可写条件, 执行rule的callback()
+	add_rule():添加规则
+	class FDRule: 
+		Direction direction; fd是被写入还是需要输出到fd
+		InterestT interest; fd被感兴趣的规则，满足条件才会被poll
+		CallbackT callback; fd POLL的revents符合events(direction)时执行的操作
+		CallbackT cancel; 
+		CallbackT error;   
+	
+class TCPSegment
+	由TCPSenderMessage和TCPReceiverMessage组成
+	
+	
+class Serializer
+
+——————————————————————————————————————————————————————————————————————————————————————————————————————————————
+
+	
+#自顶向下过程分析
+用例1: server(tcp_native), client(tcp_native)
+(流程是从stdin读入, TCPSocket写出给另一端, 然后另一端TCPSocket读入, stdout写出)
+1. server listen然后accept等待连接, client connect与服务器建立连接(三次握手是通过syscall_connect实现)
+2. bidirectional_stream_copy的while循环是主循环，在eventloop中添加rule响应segment输入输出
+3. socket.write(syscall_writev) socket.read(syscall_read)实际发送网络数据。发送方的TCPSocket根据rule1从stdin输入, 再触发rule2从socket输出。接收端根据rule3从TCPSocket输入，再向stdout输出。
+数据流转:
+TCPSocket------------------>TCPSocket
+stdin(read)
+outbound(write, ByteStream)
+socket(write)
+							socket(read)
+							stdout(write)
+							inbound(pop, ByteStream)
+
+用例2: server(tcp_native), client(tcp_ipv4)
+0. TCPConfig c_fsm用于构造_tcp(TCPPeer), FdAdapterConfig c_filt用于存储在Adapter里, 用于生ip报文
+1. LossyTCPOverIPv4MinnowSocket tcp_socket使用TCPOverIPv4OverTunFdAdapter(with TunFD)构造socket
+2. tcp_socket.connect 握手连接到server
+	_initialize_TCP()
+		构造TCPPeer _tcp, 然后add_rule rule1:adapter有数据输入, rule2:socket自身输出_thread_data有数据输入, rule3:inbound有数据输入且_thread_data可被输出
+	_tcp->push: 发送syn信号
+	_tcp_loop: 循环等待直到syn被ack
+	_tcp_thread = std::thread(&TCPMinnowSocket::_tcp_main): 
+		新建线程后台死循环执行, 执行_initialize_TCP时的监控
+
+	tcp_socket.listen_and_accept _tcp_loop结束后, 表情已经发送ack信号并被client确认
+3. bidirectional_stream_copy() 网络数据的收发
+		执行socket in/out的时候可能触发_thread_data的in/out
+数据流转:
+(1)发起connect建立连接过程
+TCPMinnowSocket---------------------------->TCPSocket
+TODO: 
+(2)tcp_ipv4发送数据
+(流程是从stdin读入, TCPMinnowSocket写出。(实际上MinnowSocket没有连接到另一端, 利用管道中转给了_tun)通过pipe写入_thread_data, 再转给_tun)
+TCPMinnowSocket---------------------------->TCPSocket
+stdin(read)
+socket(write,TCPMinnow)
+_thread_data(read, LocalStreamSocket)
+_tun(write, Adapter, 将tcp数据wrap_tcp_in_ip)
+tcp_main->tcp_loop>Peer tick->Sender tick->_tun write(同上, 可能是超时重传)
+											|
+											|(发送ack)
+											↓
+_tun(read, Adapter, 将收到的ack ip数据unwrap_tcp_in_ip, 断点可能有多次重传)
+(3)tcp_ipv4接收数据
+(流程是_tun读入输入, 写入_thread_data。数据pipe给socket, 再输出stdout)
+TCPMinnowSocket<----------------------------TCPSocket								
+											|
+											|(发送packet)
+											↓
+_tun(read, Adapter, unwrap_tcp_in_ip)	
+_tun(write, ack, wrap_tcp_in_ip)
+_thread_data(write, 写入收到的数据)
+socket(read, TCPMinnow)
+stdout(write)
+
+——————————————————————————————————————————————————————————————————————————————————————————————————————————————
+
+#深入代码细节: 
+主要函数实现分析
+bidirectional_stream_copy()
+	1. 想eventloop的_fd_rules中添加了rules回调, 执行发送网络字节序。依次是stdin有输入, socket有输出, socket有输入, stdout有输出
+	2. while ( true )主循环，调用eventloop.wait_next_event
+		1. 根据_fd_rules, 创建符合interest条件的pollfds，并阻塞执行系统syscall_poll
+		2. 如果任意pollfd的revents满足events, 则根据rules执行callback
+3、理解webget get url(没有bidirectional_stream_copy部分的rules执行)
+4、理解TCPPeer中的make_send(): 相当于把[&]( auto x ) { _datagram_adapter.write( x ); }层层包装, 在TCPPeer里面变成了TCPSender push需要的std::function<void( const TCPSenderMessage& )>
+
+
+
