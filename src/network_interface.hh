@@ -1,9 +1,11 @@
 #pragma once
 
 #include "address.hh"
+#include "arp_message.hh"
 #include "ethernet_frame.hh"
 #include "ipv4_datagram.hh"
 
+#include <map>
 #include <memory>
 #include <queue>
 
@@ -82,4 +84,24 @@ private:
 
   // Datagrams that have been received
   std::queue<InternetDatagram> datagrams_received_ {};
+
+  ////////////////////// Created by myself //////////////////////
+  ARPMessage make_arp( const uint16_t opcode,
+                       const EthernetAddress sender_ethernet_address,
+                       const std::string& sender_ip_address,
+                       const EthernetAddress target_ethernet_address,
+                       const std::string& target_ip_address );
+
+  EthernetFrame make_frame( const EthernetAddress& src,
+                            const EthernetAddress& dst,
+                            const uint16_t type,
+                            std::vector<Ref<std::string>> payload );
+
+  static constexpr size_t EXPIRED_TIME = 30 * 1000;
+  static constexpr size_t ARP_REQUEST_GAP = 5 * 1000;
+
+  using DgramAndTTL = std::pair<InternetDatagram, size_t>;
+  std::map<uint32_t, std::pair<EthernetAddress, size_t>> mapping_table_; // ip -> {ethernet, ttl}
+  std::multimap<uint32_t, DgramAndTTL> dgrams_to_send_;                  // ip -> {dgram, ttl}
+  std::map<uint32_t, size_t> arp_gap_;                                   // ip -> time since last gap
 };
