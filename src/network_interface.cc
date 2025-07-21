@@ -83,9 +83,9 @@ void NetworkInterface::recv_frame( EthernetFrame frame )
     if ( dgrams_to_send_.contains( sender_ipv4 ) ) {
       auto [head, tail] = dgrams_to_send_.equal_range( sender_ipv4 );
       for_each( head, tail, [this, &sender_eth]( const auto& pair ) {
-        EthernetFrame frame
+        EthernetFrame eth_frame
           = make_frame( ethernet_address_, sender_eth, EthernetHeader::TYPE_IPv4, serialize( pair.second.first ) );
-        transmit( frame );
+        transmit( eth_frame );
       } );
       dgrams_to_send_.erase( head, tail );
     }

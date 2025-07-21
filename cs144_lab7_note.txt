@@ -1,0 +1,38 @@
+# Check7
+
+从全局理解, 不能断点
+TODO:画host, router, Internet拓扑图
+
+三个线程 1.主线程 2.network线程 3.TCPMinnowSocket的_tcp_main现成
+
+program_body:
+internet_socket连接了bounce_host, 所有向socket写入的数据都回到bounce_host
+建立networkd_interface,本地Router建立路由表。创建TCPSocketEndToEnd socket
+创建network_thread线程，add_rule监听 host <==> router, router <==> Internet的通信
+
+疑问:
+Q.为什么需要三个线程?每个线程的作用是什么?
+A.bidrectional(main线程): stdin/stdout<==>ByteStream<==>TCPSocketEndToEnd
+  TCPMinnowSocket(_tcp_main线程): TCPSocketEndToEnd<==>NetworkInterfaceAdapter
+  endtoend(network_thread线程): NetworkInterfaceAdapter<==>Internet
+Q.server的NetworkInterfaceAdapter是如何确定destination ip是192.168.0.50, 并wrap ip的?
+A.server listen_and_accept时TCPOverIPv4Adapter::unwrap_tcp_in_ip, 将client ip设为adapter的destination
+Q.host序与大端序的转换问题?
+A.serialize的时候将integer的host序列转换为网络大端序, string是单字节不做转换
+
+ByteStream: 在bidirectional_stream_copy
+TCPSender, TCPReceiver(in TCPPeer): 在TCPMinnowSocket中间
+
+
+用例: client(192.168.0.50)从stdin写入到发送的流程
+1.stdin——>outbound(ByteStream) (bidrectional rule1)
+2.outbound——>TCPSocketEndToEnd的fd(LocalStreamSocket, 与_thread_data连通) (bidrectional rule2)
+3.TCPSocketEndToEnd的fd(_thread_data)——>_tcp(TCPPeer)写入, 并且_datagram_adapter(NetworkInterfaceAdapter, 192.168.0.50)执行write (TCPMinnowSocket rule2)
+4.NetworkInterfaceAdapter write到fd()的数据——>NetworkInterfaceAdapter的frame_fd()
+5.TCPSocketEndToEnd的NetworkInterfaceAdapter的frame_fd()——>router的interface(host_side, 192.168.0.1) recv_frame (network_thread: host to router)
+6.调用route,从NetworkInterface(10.0.0.192)路由出(TCP header dst_ip由sock connect设置到NetworkAdapter的config里面) (network_thread: host to router)
+7.NetworkInterface(10.0.0.192)的router_to_internet.write——>internet_socket.write (network_thread: router to Internet)
+
+
+用例: 从internet socket收到到stdout写出
+逻辑类似, rule不同

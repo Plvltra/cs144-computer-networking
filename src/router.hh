@@ -38,5 +38,5 @@ private:
   ////////////////////// Created by myself //////////////////////
   using PrefixInfo = std::pair<uint32_t, uint8_t>;                      // <route_prefix, prefix_length>
   using ForwardingTarget = std::pair<std::optional<Address>, size_t>;   // <next_hop, interface_num>
-  std::map<PrefixInfo, ForwardingTarget> route_tables_;
+  std::map<PrefixInfo, ForwardingTarget> route_tables_ {};
 };

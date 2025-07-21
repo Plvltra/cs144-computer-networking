@@ -31,9 +31,9 @@ void Router::route()
   ranges::for_each(interfaces_, [&route_tables = this->route_tables_, &interfaces = this->interfaces_](std::shared_ptr<NetworkInterface> interface){
     std::queue<InternetDatagram>& dgrams = interface->datagrams_received();
 
-    auto ProcessDgrams = [&route_tables, &interfaces](std::queue<InternetDatagram>& dgrams){
-      while (!dgrams.empty()) {
-        InternetDatagram& dgram = dgrams.front();
+    auto ProcessDgrams = [&route_tables, &interfaces](std::queue<InternetDatagram>& dgrams_queue){
+      while (!dgrams_queue.empty()) {
+        InternetDatagram& dgram = dgrams_queue.front();
         uint32_t dst_ip = dgram.header.dst;
         auto match_prefix = route_tables | views::filter([dst_ip](auto& item){
           auto& [route_prefix, prefix_length] = item.first;
@@ -54,7 +54,7 @@ void Router::route()
 
         // If no routes matched or ttl belows 1, drop the datagram
         if (longest_prefix_it == match_prefix.end() || dgram.header.ttl <= 1) {
-          dgrams.pop();
+          dgrams_queue.pop();
           continue;
         }
         // Send datagram
@@ -63,7 +63,7 @@ void Router::route()
         dgram.header.compute_checksum();
         interfaces[interface_num]->send_datagram(dgram,
             next_hop.has_value() ? next_hop.value() : Address::from_ipv4_numeric(dst_ip));
-        dgrams.pop();
+        dgrams_queue.pop();
       }
     };
 

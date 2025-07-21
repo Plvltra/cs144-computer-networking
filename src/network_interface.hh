@@ -101,7 +101,7 @@ private:
   static constexpr size_t ARP_REQUEST_GAP = 5 * 1000;
 
   using DgramAndTTL = std::pair<InternetDatagram, size_t>;
-  std::map<uint32_t, std::pair<EthernetAddress, size_t>> mapping_table_; // ip -> {ethernet, ttl}
-  std::multimap<uint32_t, DgramAndTTL> dgrams_to_send_;                  // ip -> {dgram, ttl}
-  std::map<uint32_t, size_t> arp_gap_;                                   // ip -> time since last gap
+  std::map<uint32_t, std::pair<EthernetAddress, size_t>> mapping_table_ {}; // ip -> {ethernet, ttl}
+  std::multimap<uint32_t, DgramAndTTL> dgrams_to_send_ {};                  // ip -> {dgram, ttl}
+  std::map<uint32_t, size_t> arp_gap_ {};                                   // ip -> time since last gap
 };
